@@ -5,33 +5,53 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/mangudaigb/context-service/db"
 	"github.com/mangudaigb/dhauli-base/logger"
 	"github.com/mangudaigb/dhauli-base/types/entities"
-	"go.mongodb.org/mongo-driver/bson"
 )
 
-type ContextHandler struct {
-	log  *logger.Logger
-	Repo db.ContextRepository
+type ContextRequest struct {
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	UserID         string `json:"user_id"`
 }
 
-func NewContextHandler(log *logger.Logger, repo db.ContextRepository) *ContextHandler {
+type ContextHandler struct {
+	log *logger.Logger
+	svc ContextService
+}
+
+func NewContextHandler(log *logger.Logger, svc ContextService) *ContextHandler {
 	return &ContextHandler{
-		log:  log,
-		Repo: repo,
+		log: log,
+		svc: svc,
 	}
 }
 
-func (h *ContextHandler) GetContext(c *gin.Context) {
+func (ch *ContextHandler) GetContextByFilter(c *gin.Context) {
+	var reqData ContextRequest
+	if err := c.ShouldBindJSON(&reqData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	list, err := ch.svc.FilterContexts(c.Request.Context(), reqData)
+	if err != nil {
+		ch.log.Errorf("Error filtering contexts: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+func (ch *ContextHandler) GetContext(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Context ID is required"})
 		return
 	}
 
-	doc, err := h.Repo.GetContextByID(c.Request.Context(), id)
+	doc, err := ch.svc.GetContextByID(c.Request.Context(), id)
 	if err != nil {
+		ch.log.Errorf("Error getting context %s: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
 	}
@@ -44,14 +64,14 @@ func (h *ContextHandler) GetContext(c *gin.Context) {
 	c.JSON(http.StatusOK, doc)
 }
 
-func (h *ContextHandler) CreateContext(c *gin.Context) {
+func (ch *ContextHandler) CreateContext(c *gin.Context) {
 	var newContext entities.Context
 	if err := c.ShouldBindJSON(&newContext); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	createdDoc, err := h.Repo.CreateContext(c.Request.Context(), &newContext)
+	createdDoc, err := ch.svc.CreateContext(c.Request.Context(), &newContext)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create context: " + err.Error()})
 		return
@@ -60,27 +80,31 @@ func (h *ContextHandler) CreateContext(c *gin.Context) {
 	c.JSON(http.StatusCreated, createdDoc)
 }
 
-func (h *ContextHandler) UpdateContext(c *gin.Context) {
+func (ch *ContextHandler) UpdateContext(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Context ID is required"})
 		return
 	}
 
-	// Use bson.M for unmarshaling to match the repository signature
-	var updates bson.M
+	var updates entities.Context
 	if err := c.ShouldBindJSON(&updates); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Important: The client MUST provide the "version" for optimistic locking.
-	if _, ok := updates["version"]; !ok {
+	if updates.Version == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Optimistic lock failed: 'version' field is required in the update payload"})
 		return
 	}
 
-	updatedDoc, err := h.Repo.UpdateContext(c.Request.Context(), id, updates)
+	if updates.ID != id {
+		ch.log.Errorf("ID mismatch in update payload: %s != %s", updates.ID, id)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID mismatch in update payload"})
+		return
+	}
+
+	updatedDoc, err := ch.svc.UpdateContext(c.Request.Context(), &updates)
 	if err != nil {
 		if errors.Is(err, errors.New("document update failed: document not found or version mismatch (Optimistic Lock failure)")) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Update failed due to version mismatch or document not found."})
@@ -94,14 +118,14 @@ func (h *ContextHandler) UpdateContext(c *gin.Context) {
 }
 
 // DeleteContext deletes a document by ID.
-func (h *ContextHandler) DeleteContext(c *gin.Context) {
+func (ch *ContextHandler) DeleteContext(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Context ID is required"})
 		return
 	}
 
-	err := h.Repo.DeleteContext(c.Request.Context(), id)
+	_, err := ch.svc.DeleteContext(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, errors.New("document not found for deletion")) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Context not found"})
@@ -112,18 +136,4 @@ func (h *ContextHandler) DeleteContext(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Context deleted successfully"})
-}
-
-func SetupRouter(log *logger.Logger, repo db.ContextRepository) *gin.Engine {
-	r := gin.Default()
-	handler := NewContextHandler(log, repo)
-
-	contextRoutes := r.Group("/contexts")
-	{
-		contextRoutes.GET("/:id", handler.GetContext)
-		contextRoutes.POST("/", handler.CreateContext)
-		contextRoutes.PATCH("/:id", handler.UpdateContext) // Using PATCH for partial updates
-		contextRoutes.DELETE("/:id", handler.DeleteContext)
-	}
-	return r
 }

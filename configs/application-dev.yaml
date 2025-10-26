@@ -23,7 +23,7 @@ kafka:
   routerTopic: router
 
 discovery:
-  id: context-service  // k8s pod-id
+  id: context-service
   fqdn: context-service.localhost.k8s.local
   protocol: com.mangudaigb.dhauli.events.json.v1
   topic: context
