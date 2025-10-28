@@ -51,10 +51,6 @@ func (mcr *MongoContextRepository) GetByID(ctx context.Context, id string) (*ent
 }
 
 func (mcr *MongoContextRepository) Create(ctx context.Context, c *entities.Context) (*entities.Context, error) {
-	now := time.Now()
-	c.CreatedTime = now
-	c.ModifiedTime = now
-	c.Version = 1
 	_, err := mcr.collection.InsertOne(ctx, c)
 	if err != nil {
 		mcr.log.Errorf("Error inserting context: %v", err)
@@ -87,11 +83,11 @@ func (mcr *MongoContextRepository) Update(ctx context.Context, nc *entities.Cont
 		},
 	}
 
-	// Return the updated document in one atomic operation
 	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
 	var updatedContext entities.Context
 	err := mcr.collection.FindOneAndUpdate(ctx, filter, update, opts).Decode(&updatedContext)
 	if errors.Is(err, mongo.ErrNoDocuments) {
+		mcr.log.Errorf("Error updating context in mongo: %v", err)
 		return nil, ErrContextVersionMismatch
 	}
 	return &updatedContext, nil
