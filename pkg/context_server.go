@@ -9,11 +9,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/mangudaigb/context-service/internal"
+	"github.com/mangudaigb/context-service/internal/handler"
+	"github.com/mangudaigb/context-service/internal/repo"
+	"github.com/mangudaigb/context-service/internal/svc"
 	"github.com/mangudaigb/dhauli-base/config"
 	"github.com/mangudaigb/dhauli-base/consumer"
 	"github.com/mangudaigb/dhauli-base/db"
 	"github.com/mangudaigb/dhauli-base/logger"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/net/context"
 )
 
@@ -25,33 +28,37 @@ type HttpServer struct {
 type ContextServer struct {
 	log *logger.Logger
 	cfg *config.Config
+	tr  trace.Tracer
 }
 
-func NewContextServer(cfg *config.Config, log *logger.Logger) *ContextServer {
+func NewContextServer(cfg *config.Config, tr trace.Tracer, log *logger.Logger) *ContextServer {
 	return &ContextServer{
 		log: log,
 		cfg: cfg,
+		tr:  tr,
 	}
 }
 
-func SetupRouter(log *logger.Logger, cSvc internal.ContextService, chSvc internal.ContextHistoryService) *gin.Engine {
+func SetupRouter(log *logger.Logger, cSvc svc.ContextService, chSvc svc.ContextHistoryService) *gin.Engine {
 	r := gin.Default()
-	cHandler := internal.NewContextHandler(log, cSvc)
-	chHandler := internal.NewContextHistoryHandler(log, chSvc)
+	cHandler := handler.NewContextHandler(log, cSvc)
+	chHandler := handler.NewContextHistoryHandler(log, chSvc)
 
 	contextRoutes := r.Group("/contexts")
 	{
 		contextRoutes.GET("/", cHandler.GetContextByFilter)
-		contextRoutes.GET("/:id", cHandler.GetContext)
+		contextRoutes.GET("/:cid", cHandler.GetContext)
 		contextRoutes.POST("/", cHandler.CreateContext)
-		contextRoutes.PATCH("/:id", cHandler.UpdateContext) // Using PATCH for partial updates
-		contextRoutes.DELETE("/:id", cHandler.DeleteContext)
+		contextRoutes.PATCH("/:cid", cHandler.UpdateContext) // Using PATCH for partial updates
+		contextRoutes.DELETE("/:cid", cHandler.DeleteContext)
+
+		contextHistoryRoutes := r.Group("/:cid/context-histories")
+		{
+			contextHistoryRoutes.GET("/", chHandler.GetContextHistoryForContextID)
+			contextHistoryRoutes.GET("/:hid", chHandler.GetContextHistoryItem)
+		}
 	}
-	contextHistoryRoutes := r.Group("/context-history")
-	{
-		contextHistoryRoutes.GET("/", chHandler.GetContextHistoryByContextID)
-		contextHistoryRoutes.GET("/:id", chHandler.GetContextHistory)
-	}
+
 	return r
 }
 
@@ -60,10 +67,10 @@ func (s *ContextServer) Start() {
 	if err != nil {
 		s.log.Fatalf("Error creating mongo client: %v", err)
 	}
-	var cRepo = internal.NewContextRepository(s.cfg, s.log, *mongoClient.Client, "context")
-	var chRepo = internal.NewContextHistoryRepository(s.cfg, s.log, *mongoClient.Client, "context_history")
-	var chSvc = internal.NewContextHistoryService(s.log, chRepo)
-	var cSvc = internal.NewContextService(s.log, cRepo, chSvc)
+	var cRepo = repo.NewContextRepository(s.cfg, s.log, *mongoClient.Client, "context")
+	var chRepo = repo.NewContextHistoryRepository(s.cfg, s.log, *mongoClient.Client, "context_history")
+	var chSvc = svc.NewContextHistoryService(s.log, chRepo)
+	var cSvc = svc.NewContextService(s.log, cRepo, chSvc)
 
 	router := SetupRouter(s.log, cSvc, chSvc)
 

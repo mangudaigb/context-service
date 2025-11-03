@@ -13,9 +13,12 @@ type Config struct {
 		Port int    `mapstructure:"port"`
 	} `mapstructure:"server"`
 	Redis struct {
-		Host    string        `mapstructure:"host"`
-		Port    int           `mapstructure:"port"`
-		Timeout time.Duration `mapstructure:"timeout"`
+		Host     string        `mapstructure:"host"`
+		Port     int           `mapstructure:"port"`
+		Timeout  time.Duration `mapstructure:"timeout"`
+		Username string        `mapstructure:"username"`
+		Password string        `mapstructure:"password"`
+		UseTLS   bool          `mapstructure:"useTLS"`
 	} `mapstructure:"redis"`
 	Zookeeper struct {
 		Servers []string `mapstructure:"servers"`
@@ -50,6 +53,10 @@ type Config struct {
 		SessionTimeout int    `mapstructure:"sessionTimeout"`
 		Version        string `mapstructure:"version"`
 	} `mapstructure:"discovery"`
+	Tracing struct {
+		Enabled bool   `mapstructure:"enabled"`
+		Url     string `mapstructure:"url"`
+	} `mapstructure:"tracing"`
 }
 
 var config *Config

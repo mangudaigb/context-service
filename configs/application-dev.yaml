@@ -30,6 +30,10 @@ discovery:
   sessionTimeout: 10
   version: "0.0.1"
 
+tracing:
+  enabled: true
+  Url: http://localhost:14268/api/traces
+
 logger:
   env: dev
   level: INFO
