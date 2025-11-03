@@ -37,7 +37,7 @@ func main() {
 			log.Errorf("Error shutting down tracer provider: %v", err)
 		}
 	}()
-	tr := tp.Tracer("conversation-memory")
+	tr := tp.Tracer("context-service")
 
 	registry := discover.NewRegistryInfo(cfg, log)
 	registry.Register(discover.SERVICE)
